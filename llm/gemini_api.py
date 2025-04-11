@@ -7,7 +7,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
-MODEL_NAME = "gemini-1.5-flash-latest"  # <--- UPDATED MODEL NAME
+MODEL_NAME = "gemini-2.0-flash"  # <--- UPDATED MODEL NAME
 
 def generate_response(user_query, context_data):
     """Generates a response using Gemini API based on context data."""
