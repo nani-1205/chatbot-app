@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>Document Chatbot</h1>
+        </div>
+        <div class="chat-history" id="chat-history">
+            {% for log in chat_history %}
+            <div class="chat-message user-message">
+                <p class="message-text"><strong>You:</strong> {{ log.question }}</p>
+            </div>
+            <div class="chat-message bot-message">
+                <p class="message-text"><strong>Bot:</strong> {{ log.response }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="chat-input-area">
+            <form id="chat-form">
+                <input type="text" id="user-query" placeholder="Type your question here..." required>
+                <button type="submit">Send</button>
+            </form>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+flask
+python-dotenv
+boto3
+PyPDF2
+python-docx
+pandas
+openpyxl
+google-generativeai
+pymongo
