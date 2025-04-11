@@ -1,9 +1,9 @@
 import os
 from flask import Flask, request, jsonify
-from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings # Example Embeddings - Optional
+from langchain_community.vectorstores import FAISS  # Corrected import
+from langchain_community.embeddings import HuggingFaceEmbeddings # Corrected import
 from langchain.chains import RetrievalQA
-from langchain.chat_models import ChatGoogleGenerativeAI
+from langchain_community.chat_models import ChatGoogleGenerativeAI # Corrected import
 from langchain.document_loaders import (
     TextLoader,
     Docx2txtLoader,
