@@ -3,13 +3,19 @@ from pymongo import MongoClient
 import os
 from dotenv import load_dotenv
 from datetime import datetime
+import urllib.parse # Make sure this line is present
 
 load_dotenv()
-MONGODB_URI = os.getenv("MONGODB_URI")
-DATABASE_NAME = "chatbot_db" # You can configure this in .env if needed
-COLLECTION_NAME = "chat_history" # You can configure this in .env if needed
 
-client = MongoClient(MONGODB_URI)
+username = urllib.parse.quote_plus(os.getenv("MONGODB_USERNAME", 'jagan')) # Default username if not in .env
+password = urllib.parse.quote_plus(os.getenv("MONGODB_PASSWORD", 'Saijagan12')) # Default password if not in .env
+hostname = os.getenv("MONGODB_HOST", '18.60.117.100') # Default host if not in .env
+port = os.getenv("MONGODB_PORT", '27017') # Default port if not in .env
+auth_source = os.getenv("MONGODB_AUTH_SOURCE", 'admin') # Default authSource if not in .env
+
+mongodb_uri = f"mongodb://{username}:{password}@{hostname}:{port}/?authSource={auth_source}"
+
+client = MongoClient(mongodb_uri)
 db = client[DATABASE_NAME]
 chat_collection = db[COLLECTION_NAME]
 
