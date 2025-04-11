@@ -3,20 +3,38 @@ from pymongo import MongoClient
 import os
 from dotenv import load_dotenv
 from datetime import datetime
-import urllib.parse # Make sure this line is present
+import urllib.parse
 
 load_dotenv()
 
-username = urllib.parse.quote_plus(os.getenv("MONGODB_USERNAME", 'jagan')) # Default username if not in .env
-password = urllib.parse.quote_plus(os.getenv("MONGODB_PASSWORD", 'Saijagan12')) # Default password if not in .env
-hostname = os.getenv("MONGODB_HOST", '18.60.117.100') # Default host if not in .env
-port = os.getenv("MONGODB_PORT", '27017') # Default port if not in .env
-auth_source = os.getenv("MONGODB_AUTH_SOURCE", 'admin') # Default authSource if not in .env
+username = urllib.parse.quote_plus(os.getenv("MONGODB_USERNAME", 'jagan'))
+password = urllib.parse.quote_plus(os.getenv("MONGODB_PASSWORD", 'Saijagan12'))
+hostname = os.getenv("MONGODB_HOST", '18.60.117.100')
+port = os.getenv("MONGODB_PORT", '27017')
+auth_source = os.getenv("MONGODB_AUTH_SOURCE", 'admin')
+DATABASE_NAME = os.getenv("DATABASE_NAME", "chatbot_db")
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "chat_history") # Added to .env and here
 
 mongodb_uri = f"mongodb://{username}:{password}@{hostname}:{port}/?authSource={auth_source}"
 
 client = MongoClient(mongodb_uri)
+
+# Check if database exists, create if not (MongoDB creates DB on first use, so explicit create is often not needed)
+db_list = client.list_database_names()
+if DATABASE_NAME not in db_list:
+    print(f"Database '{DATABASE_NAME}' not found. MongoDB will create it on first use.")
+else:
+    print(f"Database '{DATABASE_NAME}' found.")
+
 db = client[DATABASE_NAME]
+
+# Check if collection exists, create if not (MongoDB creates collection on first use)
+collection_list = db.list_collection_names()
+if COLLECTION_NAME not in collection_list:
+    print(f"Collection '{COLLECTION_NAME}' not found. MongoDB will create it on first use.")
+else:
+    print(f"Collection '{COLLECTION_NAME}' found.")
+
 chat_collection = db[COLLECTION_NAME]
 
 def save_chat_log(question, response):
