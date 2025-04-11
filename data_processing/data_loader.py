@@ -3,6 +3,7 @@ import boto3
 import os
 from dotenv import load_dotenv
 from .text_extractor import extract_text_from_file
+from .embeddings import generate_embeddings
 
 load_dotenv()
 
@@ -32,24 +33,40 @@ def download_s3_file(bucket_name, file_key, local_path):
     s3_client.download_file(bucket_name, file_key, local_path)
 
 def load_data_from_s3():
-    """Loads text data from all files in the S3 bucket."""
+    """Loads text data from all files in the S3 bucket, chunks it, and generates embeddings."""
     files = list_s3_files(S3_BUCKET_NAME)
-    all_text_data = ""
+    all_text_chunks = []
+    all_chunk_embeddings = []
+
     for file_key in files:
         print(f"Processing file: {file_key}") # For debugging
         local_file_path = f"temp_files/{file_key}" # Create temp_files directory
         os.makedirs(os.path.dirname(local_file_path), exist_ok=True) # Ensure directory exists
         download_s3_file(S3_BUCKET_NAME, file_key, local_file_path)
         text = extract_text_from_file(local_file_path)
-        all_text_data += text + "\n\n" # Separate content from different files
+
+        # Chunk text into smaller pieces (e.g., sentences or paragraphs)
+        # For simplicity, let's split by sentences. You can use more sophisticated chunking.
+        file_chunks = text.split(". ") # Simple sentence splitting, might need improvement
+        file_chunks = [chunk.strip() for chunk in file_chunks if chunk.strip()] # Remove empty chunks
+        all_text_chunks.extend(file_chunks)
+
         os.remove(local_file_path) # Clean up temporary file
-    return all_text_data
+
+    print("Generating embeddings for all text chunks...")
+    all_chunk_embeddings = generate_embeddings(all_text_chunks)
+    print("Embeddings generated.")
+
+    return all_text_chunks, all_chunk_embeddings # Return both chunks and embeddings
 
 if __name__ == '__main__':
     # Example usage (for testing)
     if not S3_BUCKET_NAME:
         print("Error: S3_BUCKET_NAME not set in .env file")
     else:
-        data = load_data_from_s3()
-        print("Data loaded successfully (sample):")
-        print(data[:500]) # Print first 500 characters as a sample
+        text_chunks, chunk_embeddings = load_data_from_s3()
+        print(f"Number of text chunks loaded: {len(text_chunks)}")
+        print(f"Number of embeddings generated: {len(chunk_embeddings)}")
+        print("Sample text chunks:")
+        for i in range(min(5, len(text_chunks))): # Print first 5 chunks as sample
+            print(f"- {text_chunks[i][:100]}...") # Print first 100 chars of each chunk
