@@ -3,7 +3,8 @@ from flask import Flask, request, jsonify
 from langchain_community.vectorstores import FAISS  # Corrected import
 from langchain_community.embeddings import HuggingFaceEmbeddings # Corrected import
 from langchain.chains import RetrievalQA
-from langchain_community.chat_models import ChatGoogleGenerativeAI # Corrected import
+# from langchain_community.chat_models import ChatGoogleGenerativeAI # Corrected import
+from langchain_google_genai import ChatGoogleGenerativeAI # Corrected import
 from langchain.document_loaders import (
     TextLoader,
     Docx2txtLoader,
