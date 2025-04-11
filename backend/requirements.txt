@@ -10,4 +10,5 @@ tiktoken
 faiss-cpu
 sentence-transformers
 boto3
-python-dotenv  # Add python-dotenv
+python-dotenv
+langchain-community  # Add this line
