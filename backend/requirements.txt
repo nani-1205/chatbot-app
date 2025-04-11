@@ -1,0 +1,13 @@
+Flask
+langchain
+google-generativeai
+PyPDF2
+pdfminer.six
+python-docx
+openpyxl
+unstructured
+tiktoken
+faiss-cpu
+sentence-transformers
+boto3
+python-dotenv  # Add python-dotenv
