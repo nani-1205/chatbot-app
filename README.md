@@ -1,3 +1,25 @@
+# Document Chatbot Web Application
+
+## Overview
+
+This is a Python Flask web application that provides a chatbot interface for answering questions based on the content of documents stored in an Amazon S3 bucket. The chatbot uses:
+
+*   **Data Source:**  Files in various text-based formats (TXT, PDF, CSV, Excel, DOCX, etc.) from an S3 bucket.
+*   **Language Model:** Google Gemini 1.5 Flash (using the `gemini-1.5-flash-latest` model via the Google Generative AI API).
+*   **Semantic Search:** Sentence Transformers for generating embeddings and performing semantic search to find relevant document chunks for better question answering.
+*   **Database:** MongoDB for storing chat history (questions and responses).
+*   **Frontend:** A simple and clean web interface built with HTML, CSS, and JavaScript.
+*   **Configuration:** Environment variables managed using `.env` for sensitive information.
+
+## Features
+
+*   **Document-Based Answers:** Chatbot answers questions based solely on the content of documents you provide in your S3 bucket.
+*   **Multi-File Format Support:**  Processes TXT, PDF, CSV, Excel (xlsx, xls), and DOCX files.
+*   **Semantic Search:** Uses sentence embeddings to find semantically relevant information in your documents, leading to more accurate answers.
+*   **Chat History:**  Stores questions and responses in a MongoDB database for persistent chat logs.
+*   **User-Friendly Web Interface:** Simple and intuitive web interface for interacting with the chatbot.
+*   **Environment Variable Configuration:**  Uses `.env` file to securely manage API keys, database credentials, and S3 bucket information.
+*   **Easy Deployment (EC2):** Designed to be easily deployed on an EC2 instance.
 
 ## Setup Instructions
 
