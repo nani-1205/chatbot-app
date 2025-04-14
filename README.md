@@ -22,28 +22,6 @@ This is a Python Flask web application that provides a chatbot interface for ans
 *   **Easy Deployment (EC2):** Designed to be easily deployed on an EC2 instance.
 
 ## Architecture Flow - Step-by-Step
-```mermaid
-graph LR
-    A[1. User (Frontend)] --> B(2. Flask Backend (app.py));
-    B --> C[3. LLM Interaction<br>(llm/gemini_api.py)];
-    C --> D[4. Data Processing<br>(data_processing/)];
-    D --> E[Google Gemini API];
-    E --> C;
-    B --> F[4. Data Processing<br>(data_processing/) - Data Loading & Embedding at Startup];
-    F --> G[6. S3 Bucket];
-    B --> H[5. Data Storage<br>(db/MongoDB) - Chat History];
-
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style B fill:#ccf,stroke:#333,stroke-width:2px
-    style C fill:#ccf,stroke:#333,stroke-width:2px
-    style D fill:#ccf,stroke:#333,stroke-width:2px
-    style E fill:#f9f,stroke:#333,stroke-width:2px
-    style F fill:#eee,stroke:#333,stroke-width:2px
-    style G fill:#eee,stroke:#333,stroke-width:2px
-    style H fill:#eee,stroke:#333,stroke-width:2px
-    style H fill:#eee,stroke:#333,stroke-width:2px
-    style I fill:#eee,stroke:#333,stroke-width:2px
-    style J fill:#eee,stroke:#333,stroke-width:2px
 
    +-------------------+
    | 1. User (Frontend) |
