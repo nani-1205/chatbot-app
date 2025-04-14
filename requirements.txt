@@ -7,6 +7,9 @@ pandas
 openpyxl
 google-generativeai
 pymongo
+langchain
 sentence-transformers
 numpy
 scikit-learn
+chromadb
+tiktoken # Optional, but recommended for Langchain text splitters

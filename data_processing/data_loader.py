@@ -3,7 +3,9 @@ import boto3
 import os
 from dotenv import load_dotenv
 from .text_extractor import extract_text_from_file
-from .embeddings import generate_embeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import Chroma
 
 load_dotenv()
 
@@ -19,6 +21,10 @@ s3_client = boto3.client(
     region_name=AWS_REGION_NAME # Optional if configured in AWS CLI or instance metadata
 )
 
+# Langchain components for text splitting and embeddings
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200) # настройте chunk_size и chunk_overlap по необходимости
+embeddings_model = HuggingFaceEmbeddings(model_name="all-mpnet-base-v2") # You can choose different embedding models
+
 def list_s3_files(bucket_name):
     """Lists all files in the S3 bucket."""
     response = s3_client.list_objects_v2(Bucket=bucket_name)
@@ -33,40 +39,38 @@ def download_s3_file(bucket_name, file_key, local_path):
     s3_client.download_file(bucket_name, file_key, local_path)
 
 def load_data_from_s3():
-    """Loads text data from all files in the S3 bucket, chunks it, and generates embeddings."""
+    """Loads data from S3, chunks it using Langchain, generates embeddings, and stores in ChromaDB."""
     files = list_s3_files(S3_BUCKET_NAME)
-    all_text_chunks = []
-    all_chunk_embeddings = []
-
+    all_texts = [] # List to hold Langchain Document objects
     for file_key in files:
-        print(f"Processing file: {file_key}") # For debugging
-        local_file_path = f"temp_files/{file_key}" # Create temp_files directory
-        os.makedirs(os.path.dirname(local_file_path), exist_ok=True) # Ensure directory exists
+        print(f"Processing file: {file_key}")
+        local_file_path = f"temp_files/{file_key}"
+        os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
         download_s3_file(S3_BUCKET_NAME, file_key, local_file_path)
-        text = extract_text_from_file(local_file_path)
+        text_content = extract_text_from_file(local_file_path)
 
-        # Chunk text into smaller pieces (e.g., sentences or paragraphs)
-        # For simplicity, let's split by sentences. You can use more sophisticated chunking.
-        file_chunks = text.split(". ") # Simple sentence splitting, might need improvement
-        file_chunks = [chunk.strip() for chunk in file_chunks if chunk.strip()] # Remove empty chunks
-        all_text_chunks.extend(file_chunks)
+        # Create Langchain Document object
+        from langchain.docstore.document import Document
+        document = Document(page_content=text_content, metadata={"source": file_key}) # Add metadata if needed
+        all_texts.append(document)
 
-        os.remove(local_file_path) # Clean up temporary file
+        os.remove(local_file_path)
 
-    print("Generating embeddings for all text chunks...")
-    all_chunk_embeddings = generate_embeddings(all_text_chunks)
-    print("Embeddings generated.")
+    print("Chunking documents using Langchain...")
+    text_chunks = text_splitter.split_documents(all_texts) # Chunk using Langchain
 
-    return all_text_chunks, all_chunk_embeddings # Return both chunks and embeddings
+    print("Generating embeddings and storing in ChromaDB...")
+    vectorstore = Chroma.from_documents(texts=text_chunks, embedding=embeddings_model, persist_directory="chroma_db") # Store in ChromaDB
+    vectorstore.persist() # Persist to disk
+
+    print("Data loaded, chunked, embedded, and stored in ChromaDB.")
+    return vectorstore # Return the ChromaDB vectorstore
 
 if __name__ == '__main__':
     # Example usage (for testing)
     if not S3_BUCKET_NAME:
         print("Error: S3_BUCKET_NAME not set in .env file")
     else:
-        text_chunks, chunk_embeddings = load_data_from_s3()
-        print(f"Number of text chunks loaded: {len(text_chunks)}")
-        print(f"Number of embeddings generated: {len(chunk_embeddings)}")
-        print("Sample text chunks:")
-        for i in range(min(5, len(text_chunks))): # Print first 5 chunks as sample
-            print(f"- {text_chunks[i][:100]}...") # Print first 100 chars of each chunk
+        vector_db = load_data_from_s3()
+        print("ChromaDB vectorstore loaded.")
+        # You can now test querying the vectorstore here if needed
