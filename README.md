@@ -22,7 +22,7 @@ This is a Python Flask web application that provides a chatbot interface for ans
 *   **Easy Deployment (EC2):** Designed to be easily deployed on an EC2 instance.
 
 ## Architecture Flow - Step-by-Step
-```mermaid
+
 
    +-------------------+
    | 1. User (Frontend) |
