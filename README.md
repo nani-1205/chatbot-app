@@ -21,6 +21,128 @@ This is a Python Flask web application that provides a chatbot interface for ans
 *   **Environment Variable Configuration:**  Uses `.env` file to securely manage API keys, database credentials, and S3 bucket information.
 *   **Easy Deployment (EC2):** Designed to be easily deployed on an EC2 instance.
 
+## Architecture Flow - Step-by-Step
+```mermaid
+graph LR
+    A[1. User (Frontend)] --> B(2. Flask Backend (app.py));
+    B --> C[3. LLM Interaction<br>(llm/gemini_api.py)];
+    C --> D[4. Data Processing<br>(data_processing/)];
+    D --> E[Google Gemini API];
+    E --> C;
+    B --> F[4. Data Processing<br>(data_processing/) - Data Loading & Embedding at Startup];
+    F --> G[6. S3 Bucket];
+    B --> H[5. Data Storage<br>(db/MongoDB) - Chat History];
+
+    style A fill:#f9f,stroke:#333,stroke-width:2px
+    style B fill:#ccf,stroke:#333,stroke-width:2px
+    style C fill:#ccf,stroke:#333,stroke-width:2px
+    style D fill:#ccf,stroke:#333,stroke-width:2px
+    style E fill:#f9f,stroke:#333,stroke-width:2px
+    style F fill:#eee,stroke:#333,stroke-width:2px
+    style G fill:#eee,stroke:#333,stroke-width:2px
+    style H fill:#eee,stroke:#333,stroke-width:2px
+    style H fill:#eee,stroke:#333,stroke-width:2px
+    style I fill:#eee,stroke:#333,stroke-width:2px
+    style J fill:#eee,stroke:#333,stroke-width:2px   
+   +-------------------+
+   | 1. User (Frontend) |
+   +-------------------+
+         |
+         | User Request (Question, Page Load)
+         v
+   +-----------------------+
+   | 2. Flask Backend (app.py) |
+   +-----------------------+
+         |         ^         ^
+         |         |         | (Chat History)
+         |         |         |
+         v         |         |
+   +-----------------------+     +---------------------+
+   | 3. LLM Interaction  | ----> | 4. Data Processing  |
+   |    (llm/gemini_api.py) |     | (data_processing/) |
+   +-----------------------+     +---------------------+
+         |                           ^         ^
+         | Gemini API Request        |         | (Document Data & Embeddings)
+         v                           |         |
+   +-----------------------+         |         |
+   |   Google Gemini API   |         |         |
+   +-----------------------+         |         |
+         |                           |         |
+         | Gemini API Response       |         |
+         v                           |         |
+   +-----------------------+         |         |
+   | 2. Flask Backend (app.py) | <-----         |
+   +-----------------------+         |         |
+         |                           |         |
+         | Response to Frontend      |         |
+         v                           |         |
+   +-------------------+             |         |
+   | 1. User (Frontend) | <-----------         |
+   +-------------------+                       |
+                                               |
+                                               | Startup Data Loading:
+   +---------------------+       Load Data &    |
+   | 4. Data Processing  | ---->  Embeddings   |
+   | (data_processing/) |       <--------------+
+   +---------------------+         |
+         |                         | Download Files
+         |                         v
+   +-------------------+      +---------------------+
+   | 6. S3 Bucket      | <----| 4. Data Processing  |
+   +-------------------+      +---------------------+
+                                               |
+                                               | Chat History:
+   +---------------------+       Store/Retrieve |
+   | 2. Flask Backend (app.py) | ---->   History    |
+   +---------------------+       <--------------+
+         |                         |
+         |                         v
+   +---------------------+
+   | 5. Data Storage     |
+   |    (db/MongoDB)    |
+   +---------------------+
+
+
+**Legend:**
+
+*   `+---------+`: Represents a Component/Module
+*   `--->`: Data Flow Direction
+*   `v`: Data Flow Downwards
+*   `^`: Data Flow Upwards
+*   `<---`: Data Flow Direction from Right to Left
+*   `------->`: Interaction/Function Call
+
+
+**Explanation of the Flow Diagram:**
+
+1.  **User (Frontend) (1):** This is where the user interacts with the chatbot through the web browser interface.
+2.  **Flask Backend (app.py) (2):** This is the central Flask application that orchestrates the entire chatbot workflow. It handles:
+    *   Receiving user requests from the Frontend.
+    *   Calling the LLM Interaction module.
+    *   Interacting with Data Processing for semantic search.
+    *   Managing Data Storage for chat history.
+    *   Sending responses back to the Frontend.
+3.  **LLM Interaction (llm/gemini_api.py) (3):** This module is responsible for:
+    *   Generating embeddings for user queries (using Data Processing).
+    *   Performing semantic search (using Data Processing).
+    *   Constructing prompts for the Gemini API.
+    *   Calling the Google Gemini API.
+    *   Processing Gemini API responses.
+4.  **Data Processing (data_processing/) (4):** This directory contains modules for:
+    *   `data_loader.py`: Loading data from S3, chunking text, and triggering embedding generation.
+    *   `text_extractor.py`: Extracting text content from different file formats.
+    *   `embeddings.py`: Generating and performing semantic search using sentence embeddings.
+5.  **Data Storage (db/MongoDB) (5):** This is the MongoDB database where chat history (questions and answers) is stored and retrieved by `db_manager.py`.
+6.  **S3 Bucket (6):** This is your Amazon S3 bucket where your document files are stored. Data is loaded from S3 at application startup by `data_loader.py`.
+7.  **Google Gemini API:** This is the external Google Generative AI API (using the Gemini model) that is called by `llm/gemini_api.py` to generate chatbot responses based on the provided context and prompts.
+
+**Workflow Paths:**
+
+*   **Question Answering Flow:** Follow the arrows from **User (Frontend)** -> **Flask Backend** -> **LLM Interaction** -> **Data Processing** (for semantic search) -> **Gemini API** -> back through the path to **User (Frontend)**.
+*   **Startup Data Loading Flow:**  Follow the path from **Flask Backend** -> **Data Processing** -> **S3 Bucket** and back to **Data Processing** and then back to **Flask Backend** (for initial data loading and embedding generation).
+*   **Chat History Flow:** Follow the path from **Flask Backend** <-> **Data Storage (MongoDB)** for saving and retrieving chat history.
+
+
 ## Setup Instructions
 
 ### Prerequisites
