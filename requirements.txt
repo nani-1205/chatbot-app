@@ -12,4 +12,5 @@ sentence-transformers
 numpy
 scikit-learn
 chromadb
-tiktoken # Optional, but recommended for Langchain text splitters
+tiktoken
+langchain-community  # <-- ADD THIS LINE
