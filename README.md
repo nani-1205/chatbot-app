@@ -36,7 +36,7 @@ This is a Python Flask web application that provides a chatbot interface for ans
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repository-url> chatbot-webapp
+    git clone -b neural-network https://github.com/nani-1205/chatbot-app.git 
     cd chatbot-webapp
     ```
 
