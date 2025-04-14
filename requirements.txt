@@ -13,4 +13,6 @@ numpy
 scikit-learn
 chromadb
 tiktoken
-langchain-community  # <-- ADD THIS LINE
+langchain-community
+langchain-huggingface
+langchain-google-genai

@@ -4,8 +4,9 @@ import os
 from dotenv import load_dotenv
 from .text_extractor import extract_text_from_file
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_community.document_loaders import S3DirectoryLoader
 
 load_dotenv()
 
@@ -25,42 +26,33 @@ s3_client = boto3.client(
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200) # настройте chunk_size и chunk_overlap по необходимости
 embeddings_model = HuggingFaceEmbeddings(model_name="all-mpnet-base-v2") # You can choose different embedding models
 
-def list_s3_files(bucket_name):
-    """Lists all files in the S3 bucket."""
-    response = s3_client.list_objects_v2(Bucket=bucket_name)
-    files = []
-    if 'Contents' in response:
-        for obj in response['Contents']:
-            files.append(obj['Key'])
-    return files
-
-def download_s3_file(bucket_name, file_key, local_path):
-    """Downloads a file from S3 to a local path."""
-    s3_client.download_file(bucket_name, file_key, local_path)
-
 def load_data_from_s3():
     """Loads data from S3, chunks it using Langchain, generates embeddings, and stores in ChromaDB."""
-    files = list_s3_files(S3_BUCKET_NAME)
-    all_texts = [] # List to hold Langchain Document objects
-    for file_key in files:
-        print(f"Processing file: {file_key}")
-        local_file_path = f"temp_files/{file_key}"
-        os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-        download_s3_file(S3_BUCKET_NAME, file_key, local_file_path)
-        text_content = extract_text_from_file(local_file_path)
 
-        # Create Langchain Document object
-        from langchain.docstore.document import Document
-        document = Document(page_content=text_content, metadata={"source": file_key}) # Add metadata if needed
-        all_texts.append(document)
+    s3_loader = S3DirectoryLoader(
+        bucket=S3_BUCKET_NAME,
+        prefix='', # Load all files in the bucket (you can specify a prefix if needed)
+        aws_access_key_id=AWS_ACCESS_KEY_ID, # Optional if EC2 instance has IAM role
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY, # Optional if EC2 instance has IAM role
+        region_name=AWS_REGION_NAME, # Optional if configured in AWS CLI or instance metadata
+        recursive=True, # Load files from subdirectories as well if present
+        silent=True, # Suppress progress output
+        show_progress=False, # Suppress progress bar
+        use_multithreading=True, # Enable multithreading for faster loading
+        load_hidden=False, # Do not load hidden files (files starting with .)
+    )
 
-        os.remove(local_file_path)
+    print("Loading documents from S3 using Langchain S3DirectoryLoader...")
+    documents = s3_loader.load()
+    print(f"Loaded {len(documents)} documents from S3.")
 
     print("Chunking documents using Langchain...")
-    text_chunks = text_splitter.split_documents(all_texts) # Chunk using Langchain
+    text_chunks = text_splitter.split_documents(documents) # Chunk using Langchain
+    print(f"Created {len(text_chunks)} text chunks.")
+
 
     print("Generating embeddings and storing in ChromaDB...")
-    vectorstore = Chroma.from_documents(texts=text_chunks, embedding=embeddings_model, persist_directory="chroma_db") # Store in ChromaDB
+    vectorstore = Chroma.from_documents(documents=text_chunks, embedding=embeddings_model, persist_directory="chroma_db") # Store in ChromaDB
     vectorstore.persist() # Persist to disk
 
     print("Data loaded, chunked, embedded, and stored in ChromaDB.")
