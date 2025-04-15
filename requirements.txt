@@ -7,12 +7,12 @@ pandas
 openpyxl
 google-generativeai
 pymongo
+# --- Langchain related ---
 langchain
-sentence-transformers
-numpy
-scikit-learn
-chromadb
-tiktoken
 langchain-community
-langchain-huggingface
-langchain-google-genai
+langchain-google-genai  # For ChatGoogleGenerativeAI
+chromadb               # Vector store
+sentence-transformers  # For HuggingFaceEmbeddings (common choice)
+langchain-huggingface  # Wrapper for HuggingFaceEmbeddings
+# --- Optional but good practice ---
+tiktoken             # Often used by text splitters

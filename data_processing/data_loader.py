@@ -3,10 +3,7 @@ import boto3
 import os
 from dotenv import load_dotenv
 from .text_extractor import extract_text_from_file
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain_community.document_loaders import S3DirectoryLoader
+from .vector_store_manager import chunk_text, add_documents_to_vector_store, needs_initial_processing
 
 load_dotenv()
 
@@ -15,54 +12,135 @@ AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION_NAME = os.getenv("AWS_REGION_NAME")
 
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=AWS_ACCESS_KEY_ID, # Optional if EC2 instance has IAM role
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY, # Optional if EC2 instance has IAM role
-    region_name=AWS_REGION_NAME # Optional if configured in AWS CLI or instance metadata
-)
-
-# Langchain components for text splitting and embeddings
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200) # настройте chunk_size и chunk_overlap по необходимости
-embeddings_model = HuggingFaceEmbeddings(model_name="all-mpnet-base-v2") # You can choose different embedding models
-
-def load_data_from_s3():
-    """Loads data from S3, chunks it using Langchain, generates embeddings, and stores in ChromaDB."""
-
-    s3_loader = S3DirectoryLoader(
-        bucket=S3_BUCKET_NAME,
-        prefix='', # Load all files in the bucket (you can specify a prefix if needed)
-        aws_access_key_id=AWS_ACCESS_KEY_ID, # Optional if EC2 instance has IAM role
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY, # Optional if EC2 instance has IAM role
-        region_name=AWS_REGION_NAME, # Optional if configured in AWS CLI or instance metadata
-        recursive=True, # Load files from subdirectories as well if present
-        silent=True, # Suppress progress output
-        show_progress=False, # Suppress progress bar
-        use_multithreading=True, # Enable multithreading for faster loading
-        load_hidden=False, # Do not load hidden files (files starting with .)
+# --- S3 Client Initialization ---
+# Handle potential missing credentials more gracefully
+s3_client = None
+try:
+    s3_client = boto3.client(
+        's3',
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        region_name=AWS_REGION_NAME
     )
-
-    print("Loading documents from S3 using Langchain S3DirectoryLoader...")
-    documents = s3_loader.load()
-    print(f"Loaded {len(documents)} documents from S3.")
-
-    print("Chunking documents using Langchain...")
-    text_chunks = text_splitter.split_documents(documents) # Chunk using Langchain
-    print(f"Created {len(text_chunks)} text chunks.")
+    # Perform a simple check like listing buckets if needed to confirm credentials
+    # s3_client.list_buckets() # Uncomment to test connection, might need permissions
+    print("S3 client initialized successfully.")
+except Exception as e:
+    print(f"Warning: Could not initialize S3 client. Check AWS credentials/config. Error: {e}")
+    print("Proceeding without S3 functionality. Data loading from S3 will fail.")
 
 
-    print("Generating embeddings and storing in ChromaDB...")
-    vectorstore = Chroma.from_documents(documents=text_chunks, embedding=embeddings_model, persist_directory="chroma_db") # Store in ChromaDB
-    vectorstore.persist() # Persist to disk
+def list_s3_files(bucket_name):
+    """Lists all files in the S3 bucket."""
+    if not s3_client:
+        print("S3 client not available.")
+        return []
+    if not bucket_name:
+        print("Error: S3_BUCKET_NAME not set.")
+        return []
 
-    print("Data loaded, chunked, embedded, and stored in ChromaDB.")
-    return vectorstore # Return the ChromaDB vectorstore
+    files = []
+    try:
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket_name)
+        for page in pages:
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    files.append(obj['Key'])
+        print(f"Found {len(files)} files in bucket '{bucket_name}'.")
+    except Exception as e:
+        print(f"Error listing files in S3 bucket '{bucket_name}': {e}")
+    return files
+
+def download_s3_file(bucket_name, file_key, local_path):
+    """Downloads a file from S3 to a local path."""
+    if not s3_client:
+        print("S3 client not available.")
+        return False
+    try:
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        s3_client.download_file(bucket_name, file_key, local_path)
+        print(f"Successfully downloaded '{file_key}' to '{local_path}'")
+        return True
+    except Exception as e:
+        print(f"Error downloading file {file_key} from S3: {e}")
+        return False
+
+def process_and_load_data_from_s3():
+    """
+    Downloads files from S3, extracts text, chunks it,
+    and loads it into the vector store.
+    Only processes if the vector store appears empty.
+    """
+    if not needs_initial_processing():
+        print("Vector store already contains data. Skipping initial processing.")
+        return
+
+    print("Starting data processing from S3...")
+    if not s3_client or not S3_BUCKET_NAME:
+        print("S3 client or bucket name not configured. Cannot process S3 data.")
+        return
+
+    files_to_process = list_s3_files(S3_BUCKET_NAME)
+    if not files_to_process:
+        print("No files found in S3 bucket to process.")
+        return
+
+    all_doc_chunks = []
+    temp_dir = "temp_s3_files"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    for file_key in files_to_process:
+        # Avoid processing directories or zero-byte objects if listed
+        if file_key.endswith('/'):
+            print(f"Skipping directory: {file_key}")
+            continue
+
+        print(f"Processing file: {file_key}")
+        local_file_path = os.path.join(temp_dir, file_key.replace('/', '_')) # Basic flattening of paths
+
+        if download_s3_file(S3_BUCKET_NAME, file_key, local_file_path):
+            text = extract_text_from_file(local_file_path)
+            if text:
+                print(f"Extracted text from {file_key}. Chunking...")
+                # Use the file key (or path) as the source metadata
+                doc_chunks = chunk_text(text, source_name=file_key)
+                all_doc_chunks.extend(doc_chunks)
+                print(f"Added {len(doc_chunks)} chunks from {file_key}.")
+            else:
+                print(f"No text extracted from {file_key}.")
+            # Clean up temporary file
+            try:
+                os.remove(local_file_path)
+            except OSError as e:
+                print(f"Error removing temporary file {local_file_path}: {e}")
+        else:
+            print(f"Failed to download {file_key}. Skipping.")
+
+    # Clean up temporary directory if empty
+    try:
+        if not os.listdir(temp_dir):
+            os.rmdir(temp_dir)
+        else: # Or remove the whole dir if you are sure
+             import shutil
+             shutil.rmtree(temp_dir)
+             print(f"Cleaned up temp directory: {temp_dir}")
+    except OSError as e:
+        print(f"Error cleaning up temp directory {temp_dir}: {e}")
+
+
+    if all_doc_chunks:
+        print(f"\nTotal chunks created: {len(all_doc_chunks)}")
+        add_documents_to_vector_store(all_doc_chunks)
+    else:
+        print("\nNo document chunks were created from S3 files.")
+
+    print("Data processing from S3 finished.")
+
 
 if __name__ == '__main__':
-    # Example usage (for testing)
-    if not S3_BUCKET_NAME:
-        print("Error: S3_BUCKET_NAME not set in .env file")
-    else:
-        vector_db = load_data_from_s3()
-        print("ChromaDB vectorstore loaded.")
-        # You can now test querying the vectorstore here if needed
+    # Example usage (for testing data loading and processing)
+    print("\n--- Testing S3 Data Loading and Processing ---")
+    # This will attempt to connect to S3 and process if the vector store is empty
+    process_and_load_data_from_s3()
+    print("\n--- Test Complete ---")
