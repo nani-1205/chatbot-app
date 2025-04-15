@@ -1,18 +1,28 @@
+# --- Core Framework ---
 flask
 python-dotenv
-boto3
-PyPDF2
-python-docx
-pandas
-openpyxl
-google-generativeai
-pymongo
-# --- Langchain related ---
-langchain
-langchain-community
-langchain-google-genai  # For ChatGoogleGenerativeAI
-chromadb               # Vector store
-sentence-transformers  # For HuggingFaceEmbeddings (common choice)
-langchain-huggingface  # Wrapper for HuggingFaceEmbeddings
-# --- Optional but good practice ---
-tiktoken             # Often used by text splitters
+
+# --- Data Sources & Processing ---
+boto3         # AWS SDK for S3
+PyPDF2        # PDF text extraction
+python-docx   # DOCX text extraction
+pandas        # CSV/Excel handling
+openpyxl      # Excel .xlsx handling
+tiktoken      # Tokenizer often used by Langchain text splitters
+
+# --- Database ---
+pymongo       # MongoDB driver
+
+# --- LLM & Langchain ---
+google-generativeai    # Google Gemini API library
+langchain              # Core Langchain library
+langchain-google-genai # Langchain integration for Google GenAI models
+langchain-huggingface  # Langchain integration for HuggingFace models (like embeddings)
+sentence-transformers  # Used by HuggingFaceEmbeddings
+
+# --- Vector Store ---
+chromadb              # The vector database library
+langchain-chroma      # Updated Langchain integration for ChromaDB
+
+# --- SQLite Fix ---
+pysqlite3-binary      # Provides an updated sqlite3 binary for ChromaDB compatibility

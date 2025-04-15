@@ -1,21 +1,41 @@
 # app.py
+
+# <<< --- ADD THIS SQLITE PATCH AT THE VERY TOP --- >>>
+try:
+    # Try to import the binary pysqlite3 module
+    # This module needs to be installed: pip install pysqlite3-binary
+    __import__('pysqlite3')
+    import sys
+    # Swap the stdlib sqlite3 module with the binary one
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+    print("Successfully patched sqlite3 with pysqlite3-binary.")
+except ImportError:
+    print("pysqlite3-binary not found or import failed, falling back to system sqlite3.")
+    # Check the system version if fallback occurs (optional)
+    try:
+        import sqlite3
+        print(f"System sqlite3 version: {sqlite3.sqlite_version}")
+        if sqlite3.sqlite_version_info < (3, 35, 0):
+             print("Warning: System sqlite3 version is older than 3.35.0. ChromaDB might not work correctly.")
+    except Exception as e:
+        print(f"Could not check system sqlite3 version: {e}")
+    pass
+# <<< --- END SQLITE PATCH --- >>>
+
+# --- Standard Imports ---
 from flask import Flask, render_template, request, jsonify
 import os
 from dotenv import load_dotenv
 import traceback # For detailed error logging
 
-# Load environment variables early, before other imports that might need them
+# Load environment variables AFTER the patch, but BEFORE other imports using them
 load_dotenv()
 
-# --- Import custom modules AFTER loading .env ---
-# Data processing and vector store
+# --- Import custom modules ---
+# These imports might trigger ChromaDB initialization, so they must come AFTER the patch
 from data_processing.data_loader import process_and_load_data_from_s3
-from data_processing.vector_store_manager import get_vector_store, needs_initial_processing
-
-# LLM interaction (using the Langchain RAG approach)
-from llm.gemini_api import generate_response
-
-# Database interaction
+from data_processing.vector_store_manager import get_vector_store
+from llm.gemini_api import generate_response # Uses Langchain RAG
 from db.db_manager import save_chat_log, get_chat_history
 
 # --- Flask App Initialization ---
@@ -23,9 +43,11 @@ app = Flask(__name__)
 # Configure static and template folders relative to the app's location
 app.static_folder = os.path.join(os.path.dirname(__file__), 'frontend/static')
 app.template_folder = os.path.join(os.path.dirname(__file__), 'frontend/templates')
+# Optional: Add a secret key for Flask session management if needed later
+# app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 
-# --- Global variable for the vector store ---
-# This will hold the loaded ChromaDB instance
+
+# --- Global variable for the vector store & initialization status ---
 vector_store = None
 initialization_error = None # Store any critical initialization errors
 
@@ -41,32 +63,29 @@ def initialize_app():
     print("--- Starting Application Initialization ---")
 
     # 1. Process data from S3 and populate vector store (if needed)
-    # process_and_load_data_from_s3() internally calls needs_initial_processing()
+    # This function now includes the check 'needs_initial_processing()'
     try:
-        print("Checking and processing S3 data if necessary...")
+        print("Step 1: Checking/Processing S3 data and populating vector store (if empty)...")
         process_and_load_data_from_s3()
-        print("S3 data processing check complete.")
+        print("Step 1: S3 data processing check complete.")
     except Exception as e:
-        error_msg = f"ERROR during initial data processing: {e}\n{traceback.format_exc()}"
+        error_msg = f"ERROR during S3 data processing check: {e}\n{traceback.format_exc()}"
         print(error_msg)
-        # Depending on severity, you might set initialization_error here
-        # For now, we'll try loading the vector store anyway, maybe it exists from a previous run.
-        initialization_error = "Warning: Error during S3 data processing check. Vector store might be incomplete or outdated."
-
+        # Store as a non-critical warning for now, maybe store exists
+        initialization_error = "Warning: Error during S3 data processing. Vector store might be incomplete or outdated."
 
     # 2. Load the vector store into memory for querying
     try:
-        print("Loading vector store...")
+        print("Step 2: Loading vector store from disk...")
         vector_store = get_vector_store() # This function now handles loading from disk
         if vector_store:
-            # Perform a simple check to confirm it's usable
             count = vector_store._collection.count()
-            print(f"Vector store loaded successfully. Contains {count} document chunks.")
-            if count == 0 and not initialization_error:
-                 initialization_error = "Warning: Vector store loaded but is empty. Check S3 processing and data."
+            print(f"Step 2: Vector store loaded successfully. Contains {count} document chunks.")
+            if count == 0 and not initialization_error: # If no previous error, but store is empty
+                 initialization_error = "Warning: Vector store loaded but is empty. Check S3 bucket contents or data processing logs."
         else:
-            # This case shouldn't happen if get_vector_store raises errors, but check anyway
-            error_msg = "ERROR: Failed to get a vector store instance from get_vector_store()."
+            # get_vector_store should have printed errors, but set a critical flag here
+            error_msg = "CRITICAL ERROR: Failed to load or initialize vector store instance."
             print(error_msg)
             initialization_error = error_msg # Critical error
 
@@ -81,66 +100,91 @@ def initialize_app():
         print(f"Initialization completed with issues: {initialization_error}")
 
 # --- Run Initialization ---
-# Run this when the script is executed.
-# Note on Gunicorn/multiple workers: This might run per worker.
-# For heavy initial processing, consider a separate setup script or lazy loading.
+# This runs once when the Flask app starts (or per worker in multi-worker setups like Gunicorn).
 initialize_app()
 
 # --- Flask Routes ---
 @app.route("/")
 def index():
     """Serves the main chat page."""
-    # Retrieve limited history for display, show newest first
+    history = []
+    db_error = None
     try:
+        # Retrieve limited history for display, show newest first
         history = get_chat_history(limit=15) # Get latest 15 Q&A pairs
-        # Pass any initialization warnings/errors to the template if needed
-        init_error_display = initialization_error if initialization_error else ""
     except Exception as e:
-        print(f"Error getting chat history: {e}")
-        history = []
-        init_error_display = initialization_error if initialization_error else "Error loading chat history."
+        print(f"Error getting chat history from DB: {e}")
+        db_error = "Could not load recent chat history from the database."
 
-    # Render the template, passing history (reversed) and potential init errors
-    return render_template('index.html', chat_history=reversed(history), initialization_error=init_error_display)
+    # Combine potential DB error with initialization error
+    display_error = initialization_error or db_error # Show init error first if it exists
+    if initialization_error and db_error:
+         display_error = f"{initialization_error} | {db_error}" # Show both if both exist
+
+    return render_template('index.html',
+                           chat_history=reversed(history), # Render newest first at bottom
+                           initialization_error=display_error)
 
 @app.route("/get_response", methods=['POST'])
 def get_chatbot_response():
     """Handles the AJAX request for getting a chatbot response."""
-    # Check if initialization failed critically
+    # --- Critical Initialization Check ---
     if vector_store is None or "CRITICAL ERROR" in (initialization_error or ""):
-         print("Error: Vector store not available due to initialization failure.")
-         return jsonify({'response': f'Sorry, the chatbot is not available due to an initialization error: {initialization_error}. Please check the server logs.'}), 503 # Service Unavailable
+         print("Error: Cannot process request. Vector store not available due to initialization failure.")
+         # Return 503 Service Unavailable
+         return jsonify({'response': f'Sorry, the chatbot is temporarily unavailable due to a setup error: {initialization_error}. Please contact the administrator.'}), 503
 
+    # --- Get User Query ---
     user_query = request.form.get('user_query', '').strip()
     if not user_query:
         return jsonify({'response': 'Please enter a question.'}), 400 # Bad Request
 
     print(f"Received query: \"{user_query}\"")
+
+    # --- Generate Response ---
     try:
-        # Generate response using the Langchain RAG pipeline
         response_text = generate_response(user_query, vector_store)
 
-        # Save interaction to MongoDB
+        # --- Save to DB (Best effort) ---
         try:
             save_chat_log(user_query, response_text)
         except Exception as db_err:
-            print(f"Error saving chat log to MongoDB: {db_err}")
-            # Continue serving the response even if DB save fails
+            print(f"Warning: Failed to save chat log to MongoDB: {db_err}")
+            # Do not fail the request if DB save fails
 
+        # --- Return Response ---
         return jsonify({'response': response_text})
 
+    # --- Handle Errors during Generation ---
     except Exception as e:
-        # Log the full error for debugging
         print(f"Error generating response for query '{user_query}': {e}")
         print(traceback.format_exc())
-        # Return a generic error to the user
-        return jsonify({'response': 'Sorry, an internal error occurred while processing your request. Please try again later.'}), 500 # Internal Server Error
+        # Return 500 Internal Server Error
+        return jsonify({'response': 'Sorry, an internal error occurred while processing your request. Please try again later or contact support if the problem persists.'}), 500
+
+# --- Health Check Endpoint (Optional) ---
+@app.route("/health")
+def health_check():
+    """Simple health check endpoint."""
+    status = {
+        "status": "OK",
+        "vector_store_loaded": vector_store is not None,
+        "initialization_error": initialization_error or "None",
+        "database_connected": db is not None # Check if db object exists from db_manager
+    }
+    http_status = 200
+    if vector_store is None or "CRITICAL" in (initialization_error or "") or db is None:
+        status["status"] = "Error"
+        http_status = 503 # Service Unavailable
+
+    return jsonify(status), http_status
 
 # --- Main Execution Block ---
 if __name__ == '__main__':
     # Runs the Flask development server.
     # For production, use a WSGI server like Gunicorn:
-    # gunicorn -w 4 -b 0.0.0.0:5000 app:app
-    # Debug mode enables auto-reloading which can be useful in development,
-    # but be aware it might re-trigger initialization.
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Example: gunicorn --workers 2 --bind 0.0.0.0:5000 app:app --log-level debug
+    # Debug mode enables auto-reloading and detailed error pages (disable in production)
+    use_debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    print(f"Running Flask app with debug mode: {use_debug_mode}")
+    app.run(debug=use_debug_mode, host='0.0.0.0', port=5000)

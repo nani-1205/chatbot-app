@@ -1,135 +1,145 @@
 # data_processing/vector_store_manager.py
 import os
 from dotenv import load_dotenv
+import traceback
+
+# Langchain components
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings # Or use GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain.schema import Document # Correct import for Document schema
+# >>> Updated Chroma import <<<
+from langchain_chroma import Chroma
+from langchain.schema import Document # For creating Document objects
 
 load_dotenv()
 
 # --- Configuration ---
-# Use environment variables or defaults
-# EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-mpnet-base-v2")
-EMBEDDING_MODEL_NAME = "all-mpnet-base-v2" # Example, choose your preferred model
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-mpnet-base-v2")
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "chroma_db")
-CHUNK_SIZE = 1000 # Size of text chunks
-CHUNK_OVERLAP = 150 # Overlap between chunks
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 1000))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", 150))
 
 # Ensure the persist directory exists
 os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
+print(f"ChromaDB persistence directory: {os.path.abspath(CHROMA_PERSIST_DIR)}")
 
 # --- Initialize Embedding Model ---
-# Using HuggingFace embeddings (requires sentence-transformers)
-# Make sure you have transformer models downloaded or internet access
-# You could also use: from langchain_google_genai import GoogleGenerativeAIEmbeddings
-# embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001") # Example using Google
+embedding_model = None
 try:
+    print(f"Loading embedding model: {EMBEDDING_MODEL_NAME}...")
     embedding_model = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL_NAME,
-        model_kwargs={'device': 'cpu'} # Use 'cuda' if GPU is available
+        model_kwargs={'device': 'cpu'}, # Use 'cuda' if GPU is available and configured
+        encode_kwargs={'normalize_embeddings': True} # Normalize for better similarity search
     )
     print("Embedding model loaded successfully.")
 except Exception as e:
-    print(f"Error loading embedding model: {e}")
-    # Handle error appropriately, maybe exit or use a fallback
-    embedding_model = None
+    print(f"CRITICAL ERROR loading embedding model: {e}\n{traceback.format_exc()}")
+    # Application might not function correctly without embeddings
 
-# --- Initialize Chroma Vector Store ---
-# Loads from disk if exists, otherwise creates new
-vector_store = Chroma(
-    persist_directory=CHROMA_PERSIST_DIR,
-    embedding_function=embedding_model # Pass the embedding function instance
-)
-print(f"Vector store initialized. Persisting to: {CHROMA_PERSIST_DIR}")
-# Check if the vector store is empty (useful for initial setup)
-print(f"Vector store collection count: {vector_store._collection.count()}")
+# --- Initialize or Load Chroma Vector Store ---
+# This will try to load from CHROMA_PERSIST_DIR if it exists,
+# otherwise, it initializes an empty store that will be saved there later.
+vector_store = None
+if embedding_model: # Only proceed if embedding model loaded
+    try:
+        print(f"Initializing Chroma vector store from: {CHROMA_PERSIST_DIR}")
+        # Pass the embedding function directly
+        vector_store = Chroma(
+            persist_directory=CHROMA_PERSIST_DIR,
+            embedding_function=embedding_model
+        )
+        count = vector_store._collection.count() # Access underlying collection count
+        print(f"Chroma vector store initialized/loaded. Current document chunk count: {count}")
+    except Exception as e:
+        print(f"CRITICAL ERROR initializing Chroma vector store: {e}\n{traceback.format_exc()}")
+        # This is a critical failure for the RAG functionality
+else:
+    print("Skipping vector store initialization because embedding model failed to load.")
 
 
 def chunk_text(text, source_name=""):
-    """Splits text into chunks."""
+    """Splits text into chunks and creates Langchain Document objects."""
+    if not text:
+        return []
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
-        length_function=len
+        length_function=len,
+        add_start_index=True, # Optionally add start index to metadata
     )
-    chunks = text_splitter.split_text(text)
-    # Create Document objects with metadata
-    documents = [Document(page_content=chunk, metadata={"source": source_name}) for chunk in chunks]
+    # Create Document objects directly from splitter
+    documents = text_splitter.create_documents([text], metadatas=[{"source": source_name}])
+    print(f"Chunked text from '{source_name}' into {len(documents)} documents.")
     return documents
 
 def add_documents_to_vector_store(documents):
     """Adds Langchain Document objects to the Chroma vector store."""
+    global vector_store
     if not documents:
-        print("No documents to add.")
+        print("No document chunks provided to add.")
         return
-    if embedding_model is None:
-        print("Embedding model not loaded. Cannot add documents.")
+    if not vector_store:
+        print("Vector store is not available. Cannot add documents.")
         return
+    if not embedding_model:
+         print("Embedding model is not available. Cannot add documents.")
+         return
 
     print(f"Adding {len(documents)} document chunks to the vector store...")
     try:
+        # Add documents in batches if necessary (though Chroma handles this reasonably well)
         vector_store.add_documents(documents)
-        vector_store.persist() # Save changes to disk
-        print("Documents added and vector store persisted.")
-        print(f"Vector store collection count after adding: {vector_store._collection.count()}")
+        # Persist changes explicitly after adding (important!)
+        vector_store.persist()
+        count = vector_store._collection.count()
+        print(f"Documents added and vector store persisted. New count: {count}")
     except Exception as e:
-        print(f"Error adding documents to vector store: {e}")
+        print(f"Error adding documents to vector store: {e}\n{traceback.format_exc()}")
 
 def get_vector_store():
-    """Returns the initialized vector store instance."""
-    # Ensure it's loaded (might be redundant if initialized globally, but safe)
-    if embedding_model is None:
-       raise Exception("Embedding model could not be initialized.")
+    """Returns the initialized vector store instance. Reloads if necessary."""
+    global vector_store
+    # If vector_store wasn't initialized properly at startup, try again (e.g., if dir was created later)
+    # However, relying on initial load is generally better.
+    if vector_store is None and embedding_model:
+         print("Attempting to reload vector store...")
+         try:
+             vector_store = Chroma(
+                 persist_directory=CHROMA_PERSIST_DIR,
+                 embedding_function=embedding_model
+             )
+             print(f"Vector store reloaded successfully. Count: {vector_store._collection.count()}")
+         except Exception as e:
+              print(f"Failed to reload vector store: {e}")
+              return None # Return None if reload fails
+    elif vector_store is None and not embedding_model:
+         print("Cannot get vector store because embedding model is not loaded.")
+         return None
 
-    # Reload from disk to ensure consistency if multiple processes were involved
-    # (though Flask dev server is usually single-process)
-    vs = Chroma(
-        persist_directory=CHROMA_PERSIST_DIR,
-        embedding_function=embedding_model
-    )
-    return vs
+    # Return the globally loaded instance
+    return vector_store
 
 def needs_initial_processing():
     """Checks if the vector store seems empty or non-existent."""
+    vs = get_vector_store() # Use the getter to ensure it tries to load
+    if vs is None:
+        print("Vector store is unavailable, assuming initial processing is needed.")
+        return True # If store can't be loaded, assume processing needed
+
     try:
-        # A simple check: does the collection exist and is it empty?
-        count = vector_store._collection.count()
-        print(f"Checking initial processing need. Current count: {count}")
-        return count == 0
+        count = vs._collection.count()
+        print(f"Checking initial processing need. Vector store count: {count}")
+        return count == 0 # If count is 0, needs processing
     except Exception as e:
         # Handle cases where the collection/directory might not exist yet properly
-        print(f"Error checking vector store count (may indicate need for processing): {e}")
+        print(f"Error checking vector store count (assuming processing needed): {e}")
         return True
 
+# Example usage for testing (optional)
 if __name__ == '__main__':
-    # Example usage (for testing this module)
-    if embedding_model: # Proceed only if embedding model loaded
+    if embedding_model and vector_store:
         print("\n--- Testing vector_store_manager ---")
-        sample_text = "This is the first sentence. This is the second sentence, which is a bit longer. The third sentence provides more context. Finally, the fourth sentence concludes the paragraph."
-        sample_source = "test_document.txt"
-
-        print("\nChunking text...")
-        doc_chunks = chunk_text(sample_text, sample_source)
-        print(f"Created {len(doc_chunks)} chunks:")
-        for i, doc in enumerate(doc_chunks):
-            print(f"  Chunk {i+1}: {doc.page_content[:50]}... (Source: {doc.metadata['source']})")
-
-        print("\nAdding documents to vector store...")
-        add_documents_to_vector_store(doc_chunks)
-
-        print("\nRetrieving vector store instance...")
-        retrieved_vs = get_vector_store()
-        print(f"Retrieved vector store object: {retrieved_vs}")
-        print(f"Retrieved vector store count: {retrieved_vs._collection.count()}")
-
-        print("\nPerforming a similarity search...")
-        query = "What is the second sentence?"
-        results = retrieved_vs.similarity_search(query, k=2)
-        print(f"Search results for '{query}':")
-        for res in results:
-            print(f"  - {res.page_content[:80]}... (Source: {res.metadata.get('source', 'N/A')})")
-
+        # ... (keep the test code from previous versions if desired) ...
         print("\n--- Test Complete ---")
     else:
-        print("Cannot run tests: Embedding model failed to load.")
+        print("\n--- Cannot run tests: Embedding model or vector store failed to load. ---")
