@@ -84,7 +84,6 @@ if constructed_uri:
         collection_names = db.list_collection_names()
         if COLLECTION_NAME not in collection_names:
             print(f"Collection '{COLLECTION_NAME}' not found. It will be created implicitly by index creation or first write.")
-            # No explicit creation needed here, index creation below handles it.
         else:
             print(f"Collection '{COLLECTION_NAME}' found in database '{DATABASE_NAME}'.")
 
@@ -92,35 +91,27 @@ if constructed_uri:
         chat_collection = db[COLLECTION_NAME]
 
         # --- Ensure Timestamp Index Exists ---
-        # This is idempotent (safe to run multiple times) and crucial for performance.
-        # It also implicitly creates the collection if it doesn't exist.
         try:
             index_name = "timestamp_desc_idx"
             print(f"Ensuring '{index_name}' index exists on '{COLLECTION_NAME}'...")
             chat_collection.create_index([("timestamp", -1)], name=index_name)
             print(f"'{index_name}' index ensured successfully.")
         except OperationFailure as opf:
-            # Log a warning but don't necessarily stop the app if index creation fails
             print(f"Warning: Could not ensure '{index_name}' index (may require specific permissions or index exists incompatibly): {opf}")
         # --- End Index Check ---
 
-        # If we reached here, setup is mostly successful
         print(f"MongoDB connection and collection '{DATABASE_NAME}.{COLLECTION_NAME}' setup complete.")
 
     except ConfigurationError as ce:
-         # Error related to URI format or options
          print(f"MongoDB Configuration Error: Invalid URI or options? URI used (masked): {log_uri}. Error: {ce}")
          client = db = chat_collection = None # Reset state
     except OperationFailure as of:
-        # Error during operations like listing collections or creating index (often auth/permissions)
         print(f"MongoDB Operation Failure during setup (Authentication failed or insufficient permissions?). Check credentials and DB user roles for '{DATABASE_NAME}'. Error: {of}")
         client = db = chat_collection = None # Reset state
     except ConnectionFailure as cf:
-        # Error connecting to the server itself
         print(f"MongoDB Connection Error: Could not connect to server {MONGODB_HOST}:{MONGODB_PORT}. Check network, firewall, and DB server status. Error: {cf}")
         client = db = chat_collection = None # Reset state
     except Exception as e:
-        # Catch any other unexpected errors
         print(f"An unexpected error occurred during MongoDB initialization: {e}\n{traceback.format_exc()}")
         client = db = chat_collection = None # Reset state
 else:
@@ -130,21 +121,36 @@ else:
 
 # --- Database Interaction Functions ---
 
-def save_chat_log(question: str, response: str):
-    """Saves the question and response to MongoDB if the collection is available."""
+# --- MODIFIED: Added optional violation_type and severity parameters ---
+def save_chat_log(question: str, response: str, violation_type: str = None, severity: str = None):
+    """
+    Saves the question and response to MongoDB.
+    Optionally includes violation_type and severity flags.
+    """
     # Use 'is None' check
     if chat_collection is None:
         print("MongoDB collection not available. Skipping chat log save.")
         return False
 
+    # Base log entry
     log_entry = {
         "question": question,
         "response": response,
         "timestamp": datetime.utcnow() # Use UTC timestamp
     }
+    # Add optional fields only if they have non-empty values
+    if violation_type:
+        log_entry["violation_type"] = violation_type
+    if severity:
+        log_entry["severity"] = severity
+
     try:
         result = chat_collection.insert_one(log_entry)
-        # print(f"Chat log saved with ID: {result.inserted_id}") # Optional: uncomment for verbose logging
+        # Log if a violation was recorded for traceability
+        if violation_type:
+             print(f"Violation ({violation_type}/{severity}) logged to DB for query: '{question[:50]}...'")
+        # else:
+             # print(f"Chat log saved with ID: {result.inserted_id}") # Optional normal logging
         return True
     except OperationFailure as of:
          # Error during the insert operation (e.g., write permissions)
@@ -170,18 +176,25 @@ def get_chat_history(limit: int = 10):
         return [] # Return empty list on error
 
 # --- Test Block (Optional) ---
-# This code runs only when the script is executed directly (e.g., python db/db_manager.py)
 if __name__ == '__main__':
      print("\n--- Testing db_manager Module ---")
      # Use 'is not None' check
      if chat_collection is not None:
-         print("\nAttempting to save a test log...")
-         save_success = save_chat_log("Test question from db_manager execution",
-                                      "Test response from db_manager execution")
-         if save_success:
-             print("Test log saved successfully (check MongoDB).")
-         else:
-             print("Failed to save test log.")
+         print("\nAttempting to save a standard test log...")
+         save_success_normal = save_chat_log("Test question - normal", "Test response - normal")
+         if save_success_normal: print("Standard test log saved successfully.")
+         else: print("Failed to save standard test log.")
+
+         print("\nAttempting to save a violation test log...")
+         save_success_violation = save_chat_log(
+             question="Test question - out of context",
+             response="I am sorry...",
+             violation_type="OUT_OF_CONTEXT_TEST",
+             severity="TEST_INFO"
+         )
+         if save_success_violation: print("Violation test log saved successfully.")
+         else: print("Failed to save violation test log.")
+
 
          print("\nAttempting to retrieve history...")
          history = get_chat_history(limit=5)
@@ -192,7 +205,9 @@ if __name__ == '__main__':
                   ts = log.get('timestamp', datetime.min).strftime('%Y-%m-%d %H:%M:%S UTC')
                   q = log.get('question', 'N/A')
                   a = log.get('response', 'N/A')[:60] # Truncate long answers
-                  print(f"{i+1}. [{ts}] Q: {q} | A: {a}...")
+                  vt = log.get('violation_type', 'None')
+                  sev = log.get('severity', 'N/A')
+                  print(f"{i+1}. [{ts}] Q: {q} | A: {a}... | Violation: {vt}/{sev}")
          else:
              print("No history retrieved or an error occurred during retrieval.")
      else:
